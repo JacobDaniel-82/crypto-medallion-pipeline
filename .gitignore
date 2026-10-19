@@ -1,0 +1,30 @@
+# Secrets and environment variables
+.env
+**/.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Airflow
+airflow/logs/
+airflow/plugins/
+
+# dbt generated files
+dbt/target/
+dbt/logs/
+dbt/dbt_packages/
+
+# Generated data and temporary files
+data/
+*.parquet
+*.csv
+*.log
+.DS_Store
+Thumbs.db
+
+# IDE settings
+.vscode/
+.idea/
