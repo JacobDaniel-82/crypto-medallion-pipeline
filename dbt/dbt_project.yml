@@ -1,0 +1,4 @@
+name: 'crypto_medallion'
+version: '1.0.0'
+profile: 'crypto_medallion'
+model-paths: ["models"]

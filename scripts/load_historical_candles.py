@@ -85,18 +85,20 @@ def main():
     if not rows:
         raise RuntimeError("No candles returned by Binance.")
 
+
     client.command(
         """
         ALTER TABLE bronze_market_candles
         DELETE WHERE symbol = {symbol:String}
           AND interval = {interval:String}
           AND source = 'batch'
+        SETTINGS mutations_sync = 1
         """,
         parameters={
             "symbol": SYMBOL,
             "interval": INTERVAL,
         },
-    )    
+    )
 
     client.insert(
         "bronze_market_candles",

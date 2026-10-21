@@ -1,0 +1,7 @@
+version: 2
+
+sources:
+  - name: bronze
+    schema: crypto_warehouse
+    tables:
+      - name: bronze_market_candles
