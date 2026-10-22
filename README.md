@@ -9,31 +9,45 @@ An end-to-end data engineering project that ingests public cryptocurrency market
 - **dbt:** Builds and tests silver and gold transformation models (ELT inside ClickHouse).
 - **ClickHouse:** Stores bronze, silver, and gold analytical tables.
 - **Docker Compose:** Provides a reproducible local environment.
-Binance REST API (history) -> Airflow + Python -> ClickHouse bronze
-Binance REST API (live) -> NiFi -> ClickHouse bronze
-ClickHouse bronze -> dbt -> silver -> dbt -> gold
+- **Binance REST API (history)** -> Airflow + Python -> ClickHouse bronze
+- **Binance REST API (live)** -> NiFi -> ClickHouse bronze
+- **ClickHouse bronze** -> dbt -> silver -> dbt -> gold
 
+
+![dbt lineage](docs/lineage.png)
 
 ## Data Scope
 
 - Market: BTC/USDT
 - Interval: 1-minute candles
-- Batch history: approximately 30 days
+- Batch history: rolling window of approximately 30 days
 - Live: one poll per minute; closed candles only
 
 ## Medallion Layers
 
 - **Bronze** (`bronze_market_candles`): Raw candles from both sources, append-only. Rows carry a `source` tag (`batch` or `nifi`) and an `ingested_at` timestamp. Overlapping live polls and batch/live overlap can create duplicate candles here by design.
 - **Silver** (`silver_market_candles`): Closed candles with sanity checks applied (positive prices, high >= low, non-negative volume), deduplicated to one row per `(symbol, interval, open_time)`, keeping the most recently ingested copy.
-- **Gold** (planned): Daily price summaries, trading volume, and price-change metrics.
+- **Gold:**
+  - `gold_daily_price_summary`: daily open, high, low, close, volume, trades, price change and percent change, with a flag for complete days (1,440 candles).
+  - `gold_hourly_market_stats`: hourly OHLC, volume and trades, with a flag for complete hours (60 candles).
+  - `gold_daily_volatility`: daily high-low range as a percent of the open, a 7-day average range, and volume relative to the 7-day average (complete days only).
+
+## Data Quality
+
+dbt tests run with `dbt test` (13 tests): not-null checks on key columns, uniqueness of the daily volatility key, no duplicate candles in silver, valid price and volume values in silver, and sanity limits on candle counts per day and per hour in gold.
+
+## Handling Gaps
+
+The live NiFi flow can only collect while it is running, so downtime leaves gaps. The batch DAG re-pulls the last 30 days and replaces its own `batch` rows without touching `nifi` rows. Silver deduplicates any overlap, so re-running the batch heals gaps with no duplicates downstream.
 
 ## Project Structure
 
 - `nifi/flows/`: Exported NiFi flow definition (`Binance_Live_Market_Ingestion.json`).
 - `airflow/dags/`: Airflow orchestration.
-- `dbt/`: dbt project (`models/sources.yml`, `models/silver/`).
+- `clickhouse/init/`: ClickHouse initialization scripts (bronze table DDL), run automatically on first start of an empty volume.
+- `dbt/`: dbt project (`models/sources.yml`, `models/silver/`, `models/gold/`, `models/schema.yml`, `tests/`).
 - `scripts/`: Supporting scripts (historical candle loader).
-- `docs/`: Architecture and implementation documentation.
+- `docs/`: Architecture documentation and the dbt lineage screenshot.
 
 ## Running Locally
 
@@ -41,11 +55,13 @@ ClickHouse bronze -> dbt -> silver -> dbt -> gold
 2. Start the services: `docker compose up -d`
 3. Import `nifi/flows/Binance_Live_Market_Ingestion.json` into NiFi (https://localhost:8443/nifi), set the ClickHouse password on the final InvokeHTTP processor, and start the process group.
 4. Trigger the `historical_crypto_ingestion` DAG in Airflow (http://localhost:8082).
-5. Build silver with dbt (from the `dbt/` folder, with `CLICKHOUSE_PASSWORD` set as an environment variable): `dbt run --profiles-dir .`
+5. Install dbt in a virtual environment: `pip install dbt-core dbt-clickhouse`
+6. From the `dbt/` folder, with `CLICKHOUSE_PASSWORD` set as an environment variable, build and test: `dbt run --profiles-dir .` then `dbt test --profiles-dir .`
 
 ## Status
 
 - Bronze batch ingestion (Airflow): done
 - Bronze live ingestion (NiFi): done
-- Silver model (dbt): done
-- In progress: gold models, dbt tests and docs, dbt scheduled through Airflow, CI/CD
+- Silver and gold models (dbt): done
+- dbt tests and lineage docs: done
+- In progress: dbt scheduled through Airflow, CI/CD (GitHub Actions)
