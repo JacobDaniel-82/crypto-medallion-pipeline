@@ -1,0 +1,75 @@
+name: dbt CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  dbt-build-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:latest
+        env:
+          CLICKHOUSE_USER: default
+          CLICKHOUSE_PASSWORD: ci_password_only
+        ports:
+          - 8123:8123
+        options: >-
+          --health-cmd "wget -qO- http://localhost:8123/ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      CLICKHOUSE_PASSWORD: ci_password_only
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dbt
+        run: pip install dbt-core==1.12.6 dbt-clickhouse==1.10.3
+
+      - name: Create bronze table from init DDL
+        run: |
+          python - <<'EOF'
+          import urllib.request, urllib.parse
+          sql = open("clickhouse/init/01_bronze_market_candles.sql").read()
+          for stmt in sql.split(";"):
+              if stmt.strip():
+                  url = "http://localhost:8123/?user=default&password=ci_password_only"
+                  urllib.request.urlopen(urllib.request.Request(url, data=stmt.encode())).read()
+          EOF
+
+      - name: Load fake candles into bronze
+        run: |
+          python - <<'EOF'
+          import urllib.request
+          def run(q):
+              url = "http://localhost:8123/?user=default&password=ci_password_only"
+              urllib.request.urlopen(urllib.request.Request(url, data=q.encode())).read()
+          for source in ("batch", "nifi"):
+              run(f"""
+              INSERT INTO crypto_warehouse.bronze_market_candles
+              (symbol, `interval`, open_time, close_time, open_price, high_price, low_price, close_price, volume, number_of_trades, is_final, source)
+              SELECT 'BTCUSDT', '1m',
+                     toDateTime64('2026-01-01 00:00:00', 3, 'UTC') + toIntervalMinute(number),
+                     toDateTime64('2026-01-01 00:00:00', 3, 'UTC') + toIntervalMinute(number) + toIntervalMillisecond(59999),
+                     100 + number % 10, 101 + number % 10, 99, 100.5, 1.5, 10, 1, '{source}'
+              FROM numbers(3000)
+              """)
+          EOF
+
+      - name: dbt build models
+        working-directory: dbt
+        run: dbt run --profiles-dir .
+
+      - name: dbt test
+        working-directory: dbt
+        run: dbt test --profiles-dir .
