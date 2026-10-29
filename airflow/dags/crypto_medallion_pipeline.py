@@ -13,6 +13,7 @@ with DAG(
     start_date=pendulum.datetime(2026, 10, 19, tz="UTC"),
     schedule="0 2 * * *",
     catchup=False,
+    max_active_runs=1,
     default_args={
         "owner": "data-engineering",
         "retries": 2,
@@ -28,12 +29,12 @@ with DAG(
 
     dbt_run = BashOperator(
         task_id="dbt_run",
-        bash_command=f"{DBT} run {DBT_ARGS}",
+        bash_command=f"{DBT} run {DBT_ARGS} --select path:models/crypto",
     )
 
     dbt_test = BashOperator(
         task_id="dbt_test",
-        bash_command=f"{DBT} test {DBT_ARGS}",
+        bash_command=f"{DBT} test {DBT_ARGS} --select path:models/crypto path:tests/crypto",
     )
 
     load_bronze_batch >> dbt_run >> dbt_test

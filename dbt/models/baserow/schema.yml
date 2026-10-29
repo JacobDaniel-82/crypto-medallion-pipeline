@@ -1,0 +1,46 @@
+version: 2
+
+models:
+  - name: silver_customers
+    columns:
+      - name: customer_code
+        tests: [not_null, unique]
+      - name: email
+        tests: [not_null, unique]
+
+  - name: silver_products
+    columns:
+      - name: product_code
+        tests: [not_null, unique]
+
+  - name: silver_orders
+    columns:
+      - name: order_code
+        tests: [not_null, unique]
+      - name: quantity
+        tests: [not_null]
+      - name: status
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['Delivered', 'Shipped', 'Pending', 'Cancelled', 'Returned']
+
+  - name: gold_order_facts
+    columns:
+      - name: order_code
+        tests: [not_null, unique]
+
+  - name: gold_daily_sales
+    columns:
+      - name: order_date
+        tests: [not_null, unique]
+
+  - name: gold_customer_summary
+    columns:
+      - name: customer_code
+        tests: [not_null, unique]
+
+  - name: gold_product_performance
+    columns:
+      - name: product_code
+        tests: [not_null, unique]

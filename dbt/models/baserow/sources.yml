@@ -1,0 +1,7 @@
+version: 2
+
+sources:
+  - name: baserow_raw
+    schema: crypto_warehouse
+    tables:
+      - name: bronze_baserow_rows

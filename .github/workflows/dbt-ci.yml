@@ -36,18 +36,18 @@ jobs:
       - name: Install dbt
         run: pip install dbt-core==1.12.6 dbt-clickhouse==1.10.3
 
-      - name: Create bronze table from init DDL
+      - name: Create bronze tables from init DDL
         run: |
           python - <<'EOF'
-          import urllib.request, urllib.parse
-          sql = open("clickhouse/init/01_bronze_market_candles.sql").read()
-          for stmt in sql.split(";"):
-              if stmt.strip():
-                  url = "http://localhost:8123/?user=default&password=ci_password_only"
-                  urllib.request.urlopen(urllib.request.Request(url, data=stmt.encode())).read()
+          import glob, urllib.request
+          for path in sorted(glob.glob("clickhouse/init/*.sql")):
+              for stmt in open(path).read().split(";"):
+                  if stmt.strip():
+                      url = "http://localhost:8123/?user=default&password=ci_password_only"
+                      urllib.request.urlopen(urllib.request.Request(url, data=stmt.encode())).read()
           EOF
 
-      - name: Load fake candles into bronze
+      - name: Load fake crypto candles into bronze
         run: |
           python - <<'EOF'
           import urllib.request
@@ -64,6 +64,53 @@ jobs:
                      100 + number % 10, 101 + number % 10, 99, 100.5, 1.5, 10, 1, '{source}'
               FROM numbers(3000)
               """)
+          EOF
+
+      - name: Load fake Baserow rows into bronze
+        run: |
+          python - <<'EOF'
+          import urllib.request
+          def run(q):
+              url = "http://localhost:8123/?user=default&password=ci_password_only"
+              urllib.request.urlopen(urllib.request.Request(url, data=q.encode())).read()
+
+          # 21 customers: C0021 is a duplicate of C0001 (same email, different case), C0006 has no country
+          run("""
+          INSERT INTO crypto_warehouse.bronze_baserow_rows (table_name, row_id, payload, extracted_at)
+          SELECT 'customers', number + 1,
+                 concat('{"customer_code":"C', leftPad(toString(number + 1), 4, '0'),
+                        '","full_name":"Test User ', toString(number + 1),
+                        '","email":"', if(number = 20, 'USER1@EXAMPLE.COM', concat('user', toString(number + 1), '@example.com')),
+                        '","country":"', if(number = 5, '', 'India'),
+                        '","signup_date":"2026-01-01","is_active":"true"}'),
+                 now64(3)
+          FROM numbers(21)
+          """)
+
+          run("""
+          INSERT INTO crypto_warehouse.bronze_baserow_rows (table_name, row_id, payload, extracted_at)
+          SELECT 'products', number + 1,
+                 concat('{"product_code":"P', leftPad(toString(number + 1), 3, '0'),
+                        '","product_name":"Item ', toString(number + 1),
+                        '","category":"Books","unit_price":"10.5"}'),
+                 now64(3)
+          FROM numbers(5)
+          """)
+
+          # 200 orders: mixed-case statuses, one order with quantity 0, some pointing at the duplicate customer
+          run("""
+          INSERT INTO crypto_warehouse.bronze_baserow_rows (table_name, row_id, payload, extracted_at)
+          SELECT 'orders', number + 1,
+                 concat('{"order_code":"O', leftPad(toString(number + 1), 5, '0'),
+                        '","customer_code":"C', leftPad(toString(number % 21 + 1), 4, '0'),
+                        '","product_code":"P', leftPad(toString(number % 5 + 1), 3, '0'),
+                        '","quantity":"', if(number = 7, '0', '2'),
+                        '","order_date":"', toString(toDate('2026-01-01') + number % 30),
+                        '","status":"', arrayElement(['Delivered', 'shipped', 'PENDING', 'Cancelled', 'Returned'], number % 5 + 1),
+                        '","discount_pct":"', if(number % 2 = 0, '0', '10'), '"}'),
+                 now64(3)
+          FROM numbers(200)
+          """)
           EOF
 
       - name: dbt build models
